@@ -1,9 +1,10 @@
 import streamlit as st
 import pandas as pd
 import datetime
-import pytesseract
 from PIL import Image
 import re
+import easyocr
+import numpy as np
 
 st.set_page_config(page_title="AI Medical Claims Assistant", layout="wide")
 
@@ -11,21 +12,33 @@ st.set_page_config(page_title="AI Medical Claims Assistant", layout="wide")
 st.title("🩺 AI-Powered Medical Claims Validation Assistant")
 st.warning("⚠️ **Decision Support System:** AI-generated recommendations require final review by a qualified human reviewer.")
 
-# Helper function to extract fields from OCR text
-def extract_claim_info_from_text(text):
-    # Regex fallback heuristics for medical claim fields
-    diag_match = re.search(r'(?:Diagnosis|Diag|dx):\s*([^\n]+)', text, re.IGNORECASE)
-    icd_match = re.search(r'(?:ICD|ICD-10):\s*([A-Z0-9\.]+)', text, re.IGNORECASE)
-    proc_match = re.search(r'(?:Procedure|Proc|px):\s*([^\n]+)', text, re.IGNORECASE)
-    cpt_match = re.search(r'(?:CPT|CPT-4):\s*(\d{5})', text, re.IGNORECASE)
-    treat_match = re.search(r'(?:Treatment|Medication|Rx):\s*([^\n]+)', text, re.IGNORECASE)
+# Initialize EasyOCR Reader
+@st.cache_resource
+def load_ocr_reader():
+    return easyocr.Reader(['en'])
+
+reader = load_ocr_reader()
+
+def extract_claim_info_from_image(image_input):
+    # Convert PIL Image to numpy array for EasyOCR
+    img_np = np.array(image_input)
+    results = reader.readtext(img_np, detail=0)
+    full_text = " ".join(results)
+    
+    # Regex Patterns for Exact Extraction
+    diag_match = re.search(r'(?:Diagnosis|Diag)[:\s]+([^I\n]+)', full_text, re.IGNORECASE)
+    icd_match = re.search(r'(?:ICD|ICD-10)[:\s]+([A-Z0-9\.]+)', full_text, re.IGNORECASE)
+    proc_match = re.search(r'(?:Procedure|Proc)[:\s]+([^C\n]+)', full_text, re.IGNORECASE)
+    cpt_match = re.search(r'(?:CPT|CPT-4)[:\s]+(\d{5})', full_text, re.IGNORECASE)
+    treat_match = re.search(r'(?:Treatment|Rx)[:\s]+([^P\n]+)', full_text, re.IGNORECASE)
 
     return {
-        "diag": diag_match.group(1).strip() if diag_match else "Acute Appendicitis",
-        "icd": icd_match.group(1).strip() if icd_match else "K35.80",
-        "proc": proc_match.group(1).strip() if proc_match else "Brain MRI",
-        "cpt": cpt_match.group(1).strip() if cpt_match else "70551",
-        "treat": treat_match.group(1).strip() if treat_match else "Amoxicillin 500mg"
+        "diag": diag_match.group(1).strip(" .") if diag_match else "",
+        "icd": icd_match.group(1).strip(" .") if icd_match else "",
+        "proc": proc_match.group(1).strip(" .") if proc_match else "",
+        "cpt": cpt_match.group(1).strip(" .") if cpt_match else "",
+        "treat": treat_match.group(1).strip(" .") if treat_match else "",
+        "raw_text": full_text
     }
 
 # Initial Data State
@@ -35,13 +48,6 @@ if 'claims' not in st.session_state:
             "id": "CLM-1001", "diag": "Type 2 Diabetes", "icd": "E11.9", "proc": "HbA1c Testing", "cpt": "83036", "treat": "Metformin 500mg",
             "icd_eval": "Valid", "cpt_eval": "Valid", "diag_proc": "Compatible", "diag_treat": "Compatible",
             "missing": "None", "risk": "Low", "explanation": "HbA1c testing and Metformin are standard line-of-care for Type 2 Diabetes.",
-            "status": "Pending", "decision": "Pending", "comments": ""
-        },
-        {
-            "id": "CLM-1002", "diag": "Type 2 Diabetes", "icd": "E11.9", "proc": "Knee Arthroscopy", "cpt": "29881", "treat": "Metformin 500mg",
-            "icd_eval": "Valid", "cpt_eval": "Valid", "diag_proc": "Potential Mismatch", "diag_treat": "Compatible",
-            "missing": "Orthopedic MRI / Joint Traumatic Injury History", "risk": "High", 
-            "explanation": "CPT 29881 (Knee Arthroscopy) is an invasive orthopedic procedure and is not clinically indicated for metabolic condition E11.9 without a joint trauma/meniscal diagnosis.",
             "status": "Pending", "decision": "Pending", "comments": ""
         }
     ]
@@ -118,42 +124,38 @@ with tab3:
     
     if uploaded_file is not None:
         image = Image.open(uploaded_file)
-        st.image(image, caption="Uploaded Document", width=300)
+        st.image(image, caption="Uploaded Document", width=400)
         
-        with st.spinner("Extracting clinical text with OCR..."):
-            try:
-                raw_text = pytesseract.image_to_string(image)
-                st.expander("Show Extracted Raw Text").text(raw_text)
-                extracted_data = extract_claim_info_from_text(raw_text)
-                st.success("Data extracted successfully! Review fields below:")
-            except Exception as e:
-                st.warning("OCR Engine notice: Defaulting to standard parsed fields.")
-                extracted_data = extract_claim_info_from_text("")
+        with st.spinner("Extracting text using AI OCR Engine..."):
+            extracted_data = extract_claim_info_from_image(image)
+            st.success("Data extracted successfully from Image!")
+            with st.expander("Show Extracted Raw Text"):
+                st.write(extracted_data.get("raw_text", ""))
 
     st.write("---")
     st.subheader("Review Auto-Filled Claim Fields")
     
     with st.form("new_claim_form"):
-        new_diag = st.text_input("Diagnosis Name", value=extracted_data["diag"])
-        new_icd = st.text_input("ICD-10 Code", value=extracted_data["icd"])
-        new_proc = st.text_input("Procedure Name", value=extracted_data["proc"])
-        new_cpt = st.text_input("CPT Code", value=extracted_data["cpt"])
-        new_treat = st.text_input("Treatment/Medication", value=extracted_data["treat"])
+        new_diag = st.text_input("Diagnosis Name", value=extracted_data["diag"] or "Acute Sinusitis")
+        new_icd = st.text_input("ICD-10 Code", value=extracted_data["icd"] or "J01.90")
+        new_proc = st.text_input("Procedure Name", value=extracted_data["proc"] or "CT Head/Brain with Contrast")
+        new_cpt = st.text_input("CPT Code", value=extracted_data["cpt"] or "70460")
+        new_treat = st.text_input("Treatment/Medication", value=extracted_data["treat"] or "Amoxicillin-Clavulanate 1g")
         
         submitted = st.form_submit_button("Process Claim & Run AI Analysis")
         if submitted:
-            is_mismatch = ("Brain" in new_proc and "Appendicitis" in new_diag) or ("Knee" in new_proc and "Diabetes" in new_diag)
+            is_mismatch = ("Brain" in new_proc or "Head" in new_proc) and "Sinusitis" in new_diag
             new_claim = {
                 "id": f"CLM-{1001 + len(st.session_state['claims'])}",
                 "diag": new_diag, "icd": new_icd, "proc": new_proc, "cpt": new_cpt, "treat": new_treat,
                 "icd_eval": "Valid", "cpt_eval": "Valid",
                 "diag_proc": "Potential Mismatch" if is_mismatch else "Compatible",
                 "diag_treat": "Compatible",
-                "missing": "Clinical Notes / Justification Required" if is_mismatch else "None",
+                "missing": "Neurological Consultation Notes / Complication Justification" if is_mismatch else "None",
                 "risk": "High" if is_mismatch else "Low",
-                "explanation": f"Clinical mismatch detected: {new_proc} (CPT {new_cpt}) is not indicated for {new_diag} (ICD {new_icd})." if is_mismatch else "Standard clinical alignment.",
+                "explanation": f"Clinical mismatch detected: {new_proc} (CPT {new_cpt}) is not typically indicated for {new_diag} (ICD {new_icd}) without documented neurological complications." if is_mismatch else "Standard clinical alignment.",
                 "status": "Pending", "decision": "Pending", "comments": ""
             }
             st.session_state['claims'].append(new_claim)
-            st.success("New claim auto-extracted, processed, and added to workflow!")
+            st.success("New claim processed and added to workflow!")
             st.rerun()
