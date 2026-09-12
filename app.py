@@ -9,8 +9,8 @@ st.title("🩺 AI-Powered Medical Claims Validation Assistant")
 st.warning("⚠️ **Decision Support System:** AI-generated recommendations require final review by a qualified human reviewer.")
 
 # Initial Synthetic Data
-if 'claims' not in st.sessions:
-    st.sessions['claims'] = [
+if 'claims' not in st.session_state:
+    st.session_state['claims'] = [
         {
             "id": "CLM-1001", "diag": "Type 2 Diabetes", "icd": "E11.9", "proc": "HbA1c Testing", "cpt": "83036", "treat": "Metformin 500mg",
             "icd_eval": "Valid", "cpt_eval": "Valid", "diag_proc": "Compatible", "diag_treat": "Compatible",
@@ -23,6 +23,19 @@ if 'claims' not in st.sessions:
             "missing": "Orthopedic MRI / Joint Traumatic Injury History", "risk": "High", 
             "explanation": "CPT 29881 (Knee Arthroscopy) is an invasive orthopedic procedure and is not clinically indicated for metabolic condition E11.9 without a joint trauma/meniscal diagnosis.",
             "status": "Pending", "decision": "Pending", "comments": ""
+        },
+        {
+            "id": "CLM-1003", "diag": "Essential Hypertension", "icd": "I10", "proc": "Electrocardiogram (ECG)", "cpt": "93000", "treat": "Lisinopril 10mg",
+            "icd_eval": "Valid", "cpt_eval": "Valid", "diag_proc": "Compatible", "diag_treat": "Compatible",
+            "missing": "None", "risk": "Low", "explanation": "ECG baseline and ACE-inhibitors are compliant for chronic essential hypertension management.",
+            "status": "Pending", "decision": "Pending", "comments": ""
+        },
+        {
+            "id": "CLM-1004", "diag": "Acute Appendicitis", "icd": "K35.80", "proc": "Brain MRI", "cpt": "70551", "treat": "Amoxicillin 500mg",
+            "icd_eval": "Valid", "cpt_eval": "Valid", "diag_proc": "Potential Mismatch", "diag_treat": "Compatible",
+            "missing": "Neurological Evaluation / Head Trauma Clinical Notes", "risk": "High", 
+            "explanation": "Brain MRI (CPT 70551) lacks medical necessity for abdominal diagnosis K35.80 without documented acute neurological deficits.",
+            "status": "Pending", "decision": "Pending", "comments": ""
         }
     ]
 
@@ -30,7 +43,7 @@ tab1, tab2, tab3 = st.tabs(["📊 Dashboard & Analytics", "🔍 Interactive Clai
 
 # --- TAB 1: DASHBOARD ---
 with tab1:
-    claims_df = pd.DataFrame(st.sessions['claims'])
+    claims_df = pd.DataFrame(st.session_state['claims'])
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Claims", len(claims_df))
     c2.metric("Pending Review", len(claims_df[claims_df['status'] == 'Pending']))
@@ -52,9 +65,9 @@ with tab2:
     
     with col_left:
         st.subheader("Select Claim")
-        claim_ids = [c['id'] for c in st.sessions['claims']]
+        claim_ids = [c['id'] for c in st.session_state['claims']]
         selected_id = st.selectbox("Choose Claim ID", claim_ids)
-        claim = next(c for c in st.sessions['claims'] if c['id'] == selected_id)
+        claim = next(c for c in st.session_state['claims'] if c['id'] == selected_id)
         
         st.write("---")
         st.markdown(f"**Claim ID:** {claim['id']}")
@@ -104,7 +117,7 @@ with tab3:
             # Simple MVP heuristic logic
             is_mismatch = "Brain" in new_proc and "Appendicitis" in new_diag
             new_claim = {
-                "id": f"CLM-{1001 + len(st.sessions['claims'])}",
+                "id": f"CLM-{1001 + len(st.session_state['claims'])}",
                 "diag": new_diag, "icd": new_icd, "proc": new_proc, "cpt": new_cpt, "treat": new_treat,
                 "icd_eval": "Valid", "cpt_eval": "Valid",
                 "diag_proc": "Potential Mismatch" if is_mismatch else "Compatible",
@@ -114,6 +127,7 @@ with tab3:
                 "explanation": f"Clinical mismatch detected: {new_proc} (CPT {new_cpt}) is not indicated for {new_diag} (ICD {new_icd})." if is_mismatch else "Standard clinical alignment.",
                 "status": "Pending", "decision": "Pending", "comments": ""
             }
-            st.sessions['claims'].append(new_claim)
+            st.session_state['claims'].append(new_claim)
             st.success("New claim processed and added to workflow!")
             st.rerun()
+    
