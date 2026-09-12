@@ -1,0 +1,119 @@
+import streamlit as st
+import pandas as pd
+import datetime
+
+st.set_page_config(page_title="AI Medical Claims Assistant", layout="wide")
+
+# Banner & Safety Notice
+st.title("🩺 AI-Powered Medical Claims Validation Assistant")
+st.warning("⚠️ **Decision Support System:** AI-generated recommendations require final review by a qualified human reviewer.")
+
+# Initial Synthetic Data
+if 'claims' not in st.sessions:
+    st.sessions['claims'] = [
+        {
+            "id": "CLM-1001", "diag": "Type 2 Diabetes", "icd": "E11.9", "proc": "HbA1c Testing", "cpt": "83036", "treat": "Metformin 500mg",
+            "icd_eval": "Valid", "cpt_eval": "Valid", "diag_proc": "Compatible", "diag_treat": "Compatible",
+            "missing": "None", "risk": "Low", "explanation": "HbA1c testing and Metformin are standard line-of-care for Type 2 Diabetes.",
+            "status": "Pending", "decision": "Pending", "comments": ""
+        },
+        {
+            "id": "CLM-1002", "diag": "Type 2 Diabetes", "icd": "E11.9", "proc": "Knee Arthroscopy", "cpt": "29881", "treat": "Metformin 500mg",
+            "icd_eval": "Valid", "cpt_eval": "Valid", "diag_proc": "Potential Mismatch", "diag_treat": "Compatible",
+            "missing": "Orthopedic MRI / Joint Traumatic Injury History", "risk": "High", 
+            "explanation": "CPT 29881 (Knee Arthroscopy) is an invasive orthopedic procedure and is not clinically indicated for metabolic condition E11.9 without a joint trauma/meniscal diagnosis.",
+            "status": "Pending", "decision": "Pending", "comments": ""
+        }
+    ]
+
+tab1, tab2, tab3 = st.tabs(["📊 Dashboard & Analytics", "🔍 Interactive Claim Reviewer", "➕ Add New Claim"])
+
+# --- TAB 1: DASHBOARD ---
+with tab1:
+    claims_df = pd.DataFrame(st.sessions['claims'])
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Claims", len(claims_df))
+    c2.metric("Pending Review", len(claims_df[claims_df['status'] == 'Pending']))
+    c3.metric("High Risk Flags", len(claims_df[claims_df['risk'] == 'High']))
+    
+    reviewed = claims_df[claims_df['status'] != 'Pending']
+    agreement = "N/A"
+    if len(reviewed) > 0:
+        agreed = len(reviewed[((reviewed['risk'] == 'High') & (reviewed['decision'] == 'Rejected')) | ((reviewed['risk'] == 'Low') & (reviewed['decision'] == 'Approved'))])
+        agreement = f"{int((agreed / len(reviewed)) * 100)}%"
+    c4.metric("AI/Human Agreement Rate", agreement)
+    
+    st.subheader("Claims Overview")
+    st.dataframe(claims_df[['id', 'diag', 'icd', 'proc', 'cpt', 'risk', 'status', 'decision']], use_container_width=True)
+
+# --- TAB 2: CLAIM REVIEWER ---
+with tab2:
+    col_left, col_right = st.columns([1, 1.2])
+    
+    with col_left:
+        st.subheader("Select Claim")
+        claim_ids = [c['id'] for c in st.sessions['claims']]
+        selected_id = st.selectbox("Choose Claim ID", claim_ids)
+        claim = next(c for c in st.sessions['claims'] if c['id'] == selected_id)
+        
+        st.write("---")
+        st.markdown(f"**Claim ID:** {claim['id']}")
+        st.markdown(f"**Diagnosis:** {claim['diag']} (`{claim['icd']}`)")
+        st.markdown(f"**Procedure:** {claim['proc']} (`{claim['cpt']}`)")
+        st.markdown(f"**Treatment:** {claim['treat']}")
+        
+    with col_right:
+        st.subheader("AI Analysis & Human Decision Workspace")
+        
+        # Status Badge
+        risk_color = "🔴" if claim['risk'] == "High" else ("🟡" if claim['risk'] == "Medium" else "🟢")
+        st.markdown(f"### Attention Level: {risk_color} {claim['risk']}")
+        
+        st.write(f"- **ICD-10 Assessment:** {claim['icd_eval']}")
+        st.write(f"- **CPT Assessment:** {claim['cpt_eval']}")
+        st.write(f"- **Diagnosis–Procedure Compatibility:** {claim['diag_proc']}")
+        st.write(f"- **Diagnosis–Treatment Compatibility:** {claim['diag_treat']}")
+        st.write(f"- **Missing Information:** {claim['missing']}")
+        
+        st.info(f"**AI Rationale:**\n{claim['explanation']}")
+        
+        st.write("---")
+        st.subheader("Reviewer Action")
+        decision = st.radio("Final Decision", ["Approved", "Rejected", "Needs Further Review"], index=0 if claim['decision'] == 'Approved' else 1)
+        comments = st.text_area("Reviewer Comments", value=claim['comments'], placeholder="Enter rationale for override or approval...")
+        
+        if st.button("Submit Final Decision"):
+            claim['decision'] = decision
+            claim['comments'] = comments
+            claim['status'] = "Reviewed"
+            st.success(f"Decision saved for {claim['id']} at {datetime.datetime.now().strftime('%H:%M:%S')}!")
+            st.rerun()
+
+# --- TAB 3: ADD NEW CLAIM ---
+with tab3:
+    st.subheader("Simulate New Claim Input")
+    with st.form("new_claim_form"):
+        new_diag = st.text_input("Diagnosis Name", "Acute Appendicitis")
+        new_icd = st.text_input("ICD-10 Code", "K35.80")
+        new_proc = st.text_input("Procedure Name", "Brain MRI")
+        new_cpt = st.text_input("CPT Code", "70551")
+        new_treat = st.text_input("Treatment/Medication", "Amoxicillin")
+        
+        submitted = st.form_submit_button("Run AI Validation Engine")
+        if submitted:
+            # Simple MVP heuristic logic
+            is_mismatch = "Brain" in new_proc and "Appendicitis" in new_diag
+            new_claim = {
+                "id": f"CLM-{1001 + len(st.sessions['claims'])}",
+                "diag": new_diag, "icd": new_icd, "proc": new_proc, "cpt": new_cpt, "treat": new_treat,
+                "icd_eval": "Valid", "cpt_eval": "Valid",
+                "diag_proc": "Potential Mismatch" if is_mismatch else "Compatible",
+                "diag_treat": "Compatible",
+                "missing": "Neurological Consultation Notes" if is_mismatch else "None",
+                "risk": "High" if is_mismatch else "Low",
+                "explanation": f"Clinical mismatch detected: {new_proc} (CPT {new_cpt}) is not indicated for {new_diag} (ICD {new_icd})." if is_mismatch else "Standard clinical alignment.",
+                "status": "Pending", "decision": "Pending", "comments": ""
+            }
+            st.sessions['claims'].append(new_claim)
+            st.success("New claim processed and added to workflow!")
+            st.rerun()
