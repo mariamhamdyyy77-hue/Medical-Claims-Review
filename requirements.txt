@@ -1,4 +1,6 @@
 streamlit
 pandas
-pytesseract
 Pillow
+easyocr
+torch
+torchvision
